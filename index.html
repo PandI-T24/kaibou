@@ -594,7 +594,15 @@
 
     function drawAll() {
         const isTestMode = document.getElementById('test-mode').checked;
-        const boxCount = (currentMode === "muscle") ? 2 : 4;
+        let boxCount = (currentMode === "muscle") ? 2 : 4;
+
+        // ボックス表示を初期化（前の回の終了表示などをクリア）
+        for(let i = 1; i <= 4; i++) {
+            document.getElementById(`box${i}-label`).innerText = "？？？";
+            document.getElementById(`box${i}-result`).innerText = "？？？";
+            updateBoxStyle(`box${i}-element`, null);
+            current_box_items[`box${i}`] = null;
+        }
 
         // --- 【筋肉モード】の抽選アルゴリズム ---
         if (currentMode === "muscle") {
@@ -611,13 +619,19 @@
                 if(activeCategories.includes('trunk')) totalActiveCount += trunk_box.filter(m => active_maps_muscle.trunk[m.name]).length;
             }
 
-            if (totalActiveCount < boxCount && isTestMode) {
-                document.getElementById('main-btn').innerText = "すべての問題が終了しました！";
-                document.getElementById('main-btn').disabled = true;
+            if (totalActiveCount === 0) {
+                if (isTestMode) {
+                    document.getElementById('main-btn').innerText = "すべての問題が終了しました！";
+                    document.getElementById('main-btn').disabled = true;
+                } else {
+                    alert("少なくともいずれかの筋肉にチェックを入れてください。");
+                }
                 return;
-            } else if (totalActiveCount === 0) {
-                alert("少なくともいずれかの筋肉にチェックを入れてください。");
-                return;
+            }
+
+            // 【新ロジック】重複なしモードで残り合計が1個しかない場合は、引く数を1個に変更する
+            if (isTestMode && totalActiveCount === 1) {
+                boxCount = 1;
             }
 
             const labelNames = { upper: "上肢筋", lower: "下肢筋", trunk: "体幹筋" };
@@ -652,7 +666,6 @@
                 }
             } else {
                 // 重複なし・部位被りなし（不可避なら被せを許可）モード
-                // 現在残っている部位のプールを調べる
                 let availablePoolCategories = [];
                 if (remaining_pools.upper.length > 0) availablePoolCategories.push('upper');
                 if (remaining_pools.lower.length > 0) availablePoolCategories.push('lower');
@@ -660,15 +673,16 @@
 
                 let chosenCategories = [];
 
-                if (availablePoolCategories.length >= 2) {
-                    // まだ異なる2つの部位から1つずつ選べる状態なら、被らないようにカテゴリを選ぶ
+                // ボックスを埋めるためのカテゴリを割り振る
+                if (availablePoolCategories.length >= boxCount) {
+                    // 各ボックスに被らないように別々のカテゴリを割り当てる
+                    let tempCats = [...availablePoolCategories];
                     for (let i = 0; i < boxCount; i++) {
-                        const catIdx = Math.floor(Math.random() * availablePoolCategories.length);
-                        chosenCategories.push(availablePoolCategories.splice(catIdx, 1)[0]);
+                        const catIdx = Math.floor(Math.random() * tempCats.length);
+                        chosenCategories.push(tempCats.splice(catIdx, 1)[0]);
                     }
                 } else {
-                    // 残りのカテゴリが1種類（例: 上肢筋のみ）あるいはプール全体が残り少ない場合は
-                    // 被りを気にせず、残っているすべてのアイテムを合体させてそこからランダムに引く
+                    // カテゴリの種類が足りない（被り発生、または残り総数1個）場合
                     let fallbackPool = [];
                     availablePoolCategories.forEach(cat => {
                         remaining_pools[cat].forEach(m => fallbackPool.push({ item: m, cat: cat }));
@@ -680,20 +694,20 @@
                             const picked = fallbackPool.splice(randIdx, 1)[0];
                             chosenCategories.push(picked.cat);
                         } else {
-                            chosenCategories.push(null); // もう本当に何もない場合
+                            chosenCategories.push(null);
                         }
                     }
                 }
 
-                // 割り振られたカテゴリを元に実際の筋肉アイテムを確定させて画面に反映する
-                for (let i = 1; i <= boxCount; i++) {
+                // 割り振られたカテゴリから実際に抽選し、画面にセット
+                for (let i = 1; i <= 2; i++) {
                     const cat = chosenCategories[i - 1];
 
+                    // 引く指定（cat）がないか、もう引けない場合は「出題なし（空欄）」にする
                     if (!cat || remaining_pools[cat].length === 0) {
                         current_box_items[`box${i}`] = null;
-                        document.getElementById(`box${i}-result`).innerText = "全問終了！";
-                        document.getElementById(`box${i}-element`).classList.add('finished');
-                        document.getElementById(`box${i}-label`).innerText = "終了";
+                        document.getElementById(`box${i}-result`).innerText = "（出題なし）";
+                        document.getElementById(`box${i}-label`).innerText = "ーーー";
                         continue;
                     }
 
@@ -707,7 +721,7 @@
                     document.getElementById(`box${i}-label`).innerText = `${labelNames[cat]}（残り ${targetPool.length}）`;
                 }
 
-                // すべてのプールが本当にゼロになったら終了処理をする
+                // すべて引ききったかチェック
                 if (remaining_pools.upper.length === 0 && remaining_pools.lower.length === 0 && remaining_pools.trunk.length === 0) {
                     document.getElementById('main-btn').innerText = "すべての問題が終了しました！";
                     document.getElementById('main-btn').disabled = true;
@@ -719,36 +733,33 @@
             let activeBones = bone_box.filter(b => active_maps_bone.bone[b.name]);
             
             if (isTestMode) {
-                if (remaining_pools.bone.length < boxCount) {
-                    for(let i = 1; i <= boxCount; i++) {
-                        if (remaining_pools.bone.length > 0) {
-                            const idx = Math.floor(Math.random() * remaining_pools.bone.length);
-                            const chosen = remaining_pools.bone.splice(idx, 1)[0];
-                            current_box_items[`box${i}`] = chosen;
-                            updateBoxStyle(`box${i}-element`, 'bone');
-                            document.getElementById(`box${i}-result`).innerText = chosen.name;
-                            document.getElementById(`box${i}-label`).innerText = `骨（残り ${remaining_pools.bone.length}）`;
-                        } else {
-                            current_box_items[`box${i}`] = null;
-                            document.getElementById(`box${i}-result`).innerText = "全問終了！";
-                            document.getElementById(`box${i}-element`).classList.add('finished');
-                            document.getElementById(`box${i}-label`).innerText = "終了";
-                        }
-                    }
-                    if(remaining_pools.bone.length === 0) {
-                        document.getElementById('main-btn').innerText = "すべての問題が終了しました！";
-                        document.getElementById('main-btn').disabled = true;
-                    }
+                // 骨モードでも残り件数に合わせて1〜4つを適切に表示する
+                const pullCount = Math.min(boxCount, remaining_pools.bone.length);
+                
+                if (pullCount === 0) {
+                    document.getElementById('main-btn').innerText = "すべての問題が終了しました！";
+                    document.getElementById('main-btn').disabled = true;
                     return;
                 }
-                
+
                 for (let i = 1; i <= boxCount; i++) {
-                    const idx = Math.floor(Math.random() * remaining_pools.bone.length);
-                    const chosen = remaining_pools.bone.splice(idx, 1)[0];
-                    current_box_items[`box${i}`] = chosen;
-                    updateBoxStyle(`box${i}-element`, 'bone');
-                    document.getElementById(`box${i}-result`).innerText = chosen.name;
-                    document.getElementById(`box${i}-label`).innerText = `骨（残り ${remaining_pools.bone.length}）`;
+                    if (i <= pullCount) {
+                        const idx = Math.floor(Math.random() * remaining_pools.bone.length);
+                        const chosen = remaining_pools.bone.splice(idx, 1)[0];
+                        current_box_items[`box${i}`] = chosen;
+                        updateBoxStyle(`box${i}-element`, 'bone');
+                        document.getElementById(`box${i}-result`).innerText = chosen.name;
+                        document.getElementById(`box${i}-label`).innerText = `骨（残り ${remaining_pools.bone.length}）`;
+                    } else {
+                        current_box_items[`box${i}`] = null;
+                        document.getElementById(`box${i}-result`).innerText = "（出題なし）";
+                        document.getElementById(`box${i}-label`).innerText = "ーーー";
+                    }
+                }
+                
+                if(remaining_pools.bone.length === 0) {
+                    document.getElementById('main-btn').innerText = "すべての問題が終了しました！";
+                    document.getElementById('main-btn').disabled = true;
                 }
             } else {
                 if (activeBones.length === 0) {
